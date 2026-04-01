@@ -105,15 +105,16 @@ def detect_ffmpeg_location() -> Optional[str]:
     return None
 
 
-def detect_js_runtime() -> Optional[str]:
+def detect_js_runtime() -> Optional[Tuple[str, str]]:
     for runtime_name, binary_name in (
         ("deno", "deno"),
         ("node", "node"),
         ("quickjs", "qjs"),
         ("bun", "bun"),
     ):
-        if shutil.which(binary_name):
-            return runtime_name
+        executable = shutil.which(binary_name)
+        if executable:
+            return runtime_name, executable
     return None
 
 
@@ -129,7 +130,8 @@ def build_ydl_base_opts() -> Dict[str, Any]:
 
     js_runtime = detect_js_runtime()
     if js_runtime:
-        ydl_opts["js_runtimes"] = [js_runtime]
+        runtime_name, executable = js_runtime
+        ydl_opts["js_runtimes"] = {runtime_name: {"executable": executable}}
 
     return ydl_opts
 
@@ -747,7 +749,8 @@ def apply_styles() -> None:
 def render_hero(source: str, output_format: str, quality: str, playlist_limit: int) -> None:
     quality_text = f"{quality} kbps" if output_format == "mp3" else "best available"
     ffmpeg_state = "Detected" if detect_ffmpeg_location() else "Missing"
-    js_runtime = detect_js_runtime() or "Missing"
+    js_runtime_info = detect_js_runtime()
+    js_runtime = js_runtime_info[0] if js_runtime_info else "Missing"
     st.markdown(
         f"""
         <div class="hero">
@@ -797,7 +800,7 @@ with st.sidebar:
 
     js_runtime = detect_js_runtime()
     if js_runtime:
-        st.caption(f"JS runtime ready for yt-dlp: {js_runtime}")
+        st.caption(f"JS runtime ready for yt-dlp: {js_runtime[0]}")
     else:
         st.warning(
             "No JS runtime found. Modern YouTube downloads often fail without one on hosted Linux."
