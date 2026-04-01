@@ -15,6 +15,7 @@ import streamlit as st
 import yt_dlp
 from mutagen.id3 import APIC, ID3, TALB, TIT2, TPE1
 from mutagen.mp3 import MP3
+from yt_dlp.utils import DownloadError
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -102,6 +103,35 @@ def detect_ffmpeg_location() -> Optional[str]:
         return str(windows_default)
 
     return None
+
+
+def detect_js_runtime() -> Optional[str]:
+    for runtime_name, binary_name in (
+        ("deno", "deno"),
+        ("node", "node"),
+        ("quickjs", "qjs"),
+        ("bun", "bun"),
+    ):
+        if shutil.which(binary_name):
+            return runtime_name
+    return None
+
+
+def build_ydl_base_opts() -> Dict[str, Any]:
+    ydl_opts: Dict[str, Any] = {
+        "quiet": True,
+        "no_warnings": True,
+    }
+
+    ffmpeg_location = detect_ffmpeg_location()
+    if ffmpeg_location:
+        ydl_opts["ffmpeg_location"] = ffmpeg_location
+
+    js_runtime = detect_js_runtime()
+    if js_runtime:
+        ydl_opts["js_runtimes"] = [js_runtime]
+
+    return ydl_opts
 
 
 def fetch_thumbnail_bytes(thumbnail_url: Optional[str]) -> Optional[bytes]:
@@ -225,7 +255,8 @@ def progress_hook(data: Dict[str, Any]) -> None:
 
 
 def get_youtube_queue(url: str) -> Tuple[List[Dict[str, str]], str]:
-    ydl_opts = {"extract_flat": True, "quiet": True, "no_warnings": True}
+    ydl_opts = build_ydl_base_opts()
+    ydl_opts["extract_flat"] = True
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
 
@@ -263,7 +294,7 @@ def get_youtube_queue(url: str) -> Tuple[List[Dict[str, str]], str]:
 
 
 def get_spotify_queue(url: str) -> Tuple[List[Dict[str, str]], str]:
-    ydl_opts = {"quiet": True, "no_warnings": True}
+    ydl_opts = build_ydl_base_opts()
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
 
@@ -356,17 +387,14 @@ def download_media(
     embed_tags: bool,
 ) -> Tuple[Path, Dict[str, Any], str]:
     download_dir = get_workspace()
-    ffmpeg_location = detect_ffmpeg_location()
-
-    ydl_opts: Dict[str, Any] = {
+    ydl_opts = build_ydl_base_opts()
+    ydl_opts.update(
+        {
         "outtmpl": str(download_dir / "%(title).180B [%(id)s].%(ext)s"),
-        "quiet": True,
-        "no_warnings": True,
         "noplaylist": True,
         "progress_hooks": [progress_hook],
-    }
-    if ffmpeg_location:
-        ydl_opts["ffmpeg_location"] = ffmpeg_location
+        }
+    )
 
     if output_format == "mp4":
         ydl_opts["format"] = "bestvideo*+bestaudio/best"
@@ -461,7 +489,20 @@ def process_download_request(
     embed_tags: bool,
     progress_panel: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
-    queue, collection_title = build_queue(source, url)
+    try:
+        queue, collection_title = build_queue(source, url)
+    except DownloadError as exc:
+        st.error(
+            "The source rejected the request while reading the link. "
+            "This usually means the hosting environment is missing a modern yt-dlp JS runtime, "
+            "or YouTube blocked that request path."
+        )
+        st.caption(str(exc))
+        return None
+    except Exception as exc:
+        st.error(f"Could not inspect that link: {exc}")
+        return None
+
     if not queue:
         st.error("Nothing was found to download from that link.")
         return None
@@ -706,6 +747,7 @@ def apply_styles() -> None:
 def render_hero(source: str, output_format: str, quality: str, playlist_limit: int) -> None:
     quality_text = f"{quality} kbps" if output_format == "mp3" else "best available"
     ffmpeg_state = "Detected" if detect_ffmpeg_location() else "Missing"
+    js_runtime = detect_js_runtime() or "Missing"
     st.markdown(
         f"""
         <div class="hero">
@@ -722,7 +764,7 @@ def render_hero(source: str, output_format: str, quality: str, playlist_limit: i
                 </div>
                 <div class="stat-card">
                     <span>Safety limit</span>
-                    <strong>{playlist_limit} items per run • FFmpeg {ffmpeg_state}</strong>
+                    <strong>{playlist_limit} items per run • FFmpeg {ffmpeg_state} • JS {js_runtime}</strong>
                 </div>
             </div>
         </div>
@@ -752,6 +794,14 @@ with st.sidebar:
         st.caption(f"FFmpeg ready: {ffmpeg_location}")
     else:
         st.warning("FFmpeg not found. MP3/WAV conversion may fail until `packages.txt` is installed on Streamlit Cloud.")
+
+    js_runtime = detect_js_runtime()
+    if js_runtime:
+        st.caption(f"JS runtime ready for yt-dlp: {js_runtime}")
+    else:
+        st.warning(
+            "No JS runtime found. Modern YouTube downloads often fail without one on hosted Linux."
+        )
 
     st.markdown("---")
     st.caption(

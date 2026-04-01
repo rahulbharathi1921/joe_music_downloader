@@ -14,7 +14,7 @@ Streamlit app for downloading YouTube or Spotify-linked audio/video with:
 3. Set the main file path to `app.py`.
 4. Deploy.
 
-`requirements.txt` installs Python packages and `packages.txt` installs `ffmpeg` for MP3/WAV conversion.
+`requirements.txt` installs Python packages and `packages.txt` installs Linux packages used by Streamlit Community Cloud. The app needs `ffmpeg` for MP3/WAV conversion, and `nodejs` helps modern `yt-dlp` handle YouTube on hosted Linux.
 
 ## Important cloud behavior
 
